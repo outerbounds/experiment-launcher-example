@@ -1,6 +1,6 @@
 import os
 import re
-from metaflow import Flow, get_namespace
+from metaflow import Flow, get_namespace, namespace
 from obproject import ProjectEvent
 
 
@@ -20,8 +20,9 @@ def project_tags():
 
 def get_parameters(flow_name):
     # find past runs in this project and branch
+    tags = project_tags()
     namespace(None)
-    runs = [run for run in Flow(flow_name).runs(project_tags) if "start" in run]
+    runs = [run for run in Flow(flow_name).runs(*tags) if "start" in run]
     if runs:
         # fetch parameter names from the latest run
         info = runs[0]["start"].task["_graph_info"].data["parameters"]
