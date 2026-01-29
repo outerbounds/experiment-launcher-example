@@ -17,6 +17,11 @@ div[data-testid="stButton"] > button.selected-cell {
     color: white !important;
     border-color: #4CAF50 !important;
 }
+[data-testid="stVerticalBlockBorderWrapper"]:first-child p,
+[data-testid="stVerticalBlockBorderWrapper"]:first-child span,
+[data-testid="stVerticalBlockBorderWrapper"]:first-child button {
+    font-size: 0.8rem !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -31,8 +36,7 @@ def load_runs():
         else:
             formatted_ts = str(ts).split(".")[0]
         row = {
-            "run_id": entry["run_id"],
-            "created_at": formatted_ts,
+            "run": f"{entry['run_id']} ({formatted_ts})",
         }
         row.update(entry["parameters"])
         rows.append(row)
@@ -45,7 +49,20 @@ if not rows:
     st.stop()
 
 df = pd.DataFrame(rows)
-param_columns = [c for c in df.columns if c not in ("run_id", "created_at")]
+param_columns = [c for c in df.columns if c != "run"]
+
+def _param_defaults(p):
+    sample = df[p].dropna().iloc[0] if not df[p].dropna().empty else ""
+    if hasattr(sample, 'item'):
+        sample = sample.item()
+    if isinstance(sample, bool):
+        return ("bool", False)
+    elif isinstance(sample, int):
+        return ("int", 0)
+    elif isinstance(sample, float):
+        return ("float", 0.0)
+    else:
+        return ("str", "")
 
 # Initialize selected parameters in session state
 if "selected_params" not in st.session_state:
@@ -55,28 +72,34 @@ def toggle_cell(param, row_idx, value):
     current = st.session_state.selected_params.get(param)
     if current and current["row"] == row_idx:
         del st.session_state.selected_params[param]
+        # Reset the widget to its default value
+        dtype, default_val = _param_defaults(param)
+        st.session_state[f"edit_{param}"] = default_val
     else:
         st.session_state.selected_params[param] = {"row": row_idx, "value": value}
+        # Update the widget's session state so it reflects the selected value
+        # Convert numpy types to native Python types for Streamlit widgets
+        if hasattr(value, 'item'):
+            value = value.item()
+        st.session_state[f"edit_{param}"] = value
 
 # --- Layout ---
-table_col, panel_col = st.columns([3, 2])
+table_col, panel_col = st.columns([5, 1])
 
 with table_col:
     st.subheader("Past Runs")
 
     # Header
-    header_cols = st.columns([2, 2] + [1] * len(param_columns))
-    header_cols[0].markdown("**Run ID**")
-    header_cols[1].markdown("**Created At**")
+    header_cols = st.columns([2] + [1] * len(param_columns))
+    header_cols[0].markdown("**Run**")
     for i, p in enumerate(param_columns):
-        header_cols[i + 2].markdown(f"**{p}**")
+        header_cols[i + 1].markdown(f"**{p}**")
 
     st.divider()
 
     for row_idx, row in df.iterrows():
-        cols = st.columns([2, 2] + [1] * len(param_columns))
-        cols[0].text(row["run_id"])
-        cols[1].text(row["created_at"])
+        cols = st.columns([2] + [1] * len(param_columns))
+        cols[0].text(row["run"])
         for i, p in enumerate(param_columns):
             val = row[p]
             key = f"cell_{row_idx}_{p}"
@@ -84,7 +107,7 @@ with table_col:
                 st.session_state.selected_params.get(p, {}).get("row") == row_idx
             )
             btn_type = "primary" if is_selected else "secondary"
-            cols[i + 2].button(
+            cols[i + 1].button(
                 str(val),
                 key=key,
                 type=btn_type,
@@ -96,32 +119,33 @@ with table_col:
 with panel_col:
     st.subheader("Experiment Parameters")
 
-    if not st.session_state.selected_params:
-        st.info("Select parameter values from the table on the left.")
-    else:
-        edited_params = {}
-        for p in param_columns:
-            if p not in st.session_state.selected_params:
-                continue
-            val = st.session_state.selected_params[p]["value"]
-            # Render an appropriate input based on value type
-            if isinstance(val, bool):
-                edited_params[p] = st.checkbox(p, value=val, key=f"edit_{p}")
-            elif isinstance(val, int):
-                edited_params[p] = st.number_input(p, value=val, step=1, key=f"edit_{p}")
-            elif isinstance(val, float):
-                edited_params[p] = st.number_input(p, value=val, key=f"edit_{p}")
-            else:
-                edited_params[p] = st.text_input(p, value=str(val), key=f"edit_{p}")
+    param_defaults = {p: _param_defaults(p) for p in param_columns}
 
-        st.divider()
+    # Initialize widget session state keys (only on first run)
+    for p in param_columns:
+        widget_key = f"edit_{p}"
+        if widget_key not in st.session_state:
+            dtype, default_val = param_defaults[p]
+            st.session_state[widget_key] = default_val
 
-        if st.button("Launch Experiment", type="primary", use_container_width=True):
-            if not edited_params:
-                st.error("Select at least one parameter.")
-            else:
-                try:
-                    trigger_event(EVENT_NAME, edited_params)
-                    st.success(f"Experiment launched with: {edited_params}")
-                except Exception as e:
-                    st.error(f"Failed to launch: {e}")
+    edited_params = {}
+    for p in param_columns:
+        dtype, default_val = param_defaults[p]
+
+        if dtype == "bool":
+            edited_params[p] = st.checkbox(p, key=f"edit_{p}")
+        elif dtype == "int":
+            edited_params[p] = st.number_input(p, step=1, key=f"edit_{p}")
+        elif dtype == "float":
+            edited_params[p] = st.number_input(p, key=f"edit_{p}")
+        else:
+            edited_params[p] = st.text_input(p, key=f"edit_{p}")
+
+    st.divider()
+
+    if st.button("Launch Experiment", type="primary", use_container_width=True):
+        try:
+            trigger_event(EVENT_NAME, edited_params)
+            st.success(f"Experiment launched with: {edited_params}")
+        except Exception as e:
+            st.error(f"Failed to launch: {e}")
