@@ -1,0 +1,7 @@
+
+platform = 'dev-yellow.outerbounds.xyz'
+project = 'experiment_launcher'
+title = 'Parametrize and launch experiments through a custom UI'
+
+[dev-assets]
+branch = 'dev'
