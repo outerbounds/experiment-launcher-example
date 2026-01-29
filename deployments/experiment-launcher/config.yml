@@ -8,3 +8,6 @@ replicas:
 
 commands:
   - streamlit run app.py --server.port 8000
+
+dependencies:
+  from_requirements_file: deployments/experiment-launcher/requirements.txt
